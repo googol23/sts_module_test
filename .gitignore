@@ -1,0 +1,26 @@
+# Python caches and packaging
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+*.egg-info/
+build/
+dist/
+
+# Runtime logs and generated analysis output
+log/
+logs/
+images/
+summary/
+*.log
+*.dump
+
+# Local inputs, mounts, and indexes
+sources/
+test_result/
+*.db
+module_test/dump_digi.txt
+
+# Generated module-test parameter files
+channelMask.par
+chargeCalibration.par
