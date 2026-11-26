@@ -79,3 +79,35 @@ def test_nominal_geometry():
         assert nominal_sensor_length_mm(SimpleNamespace(value=cm, unit="cm")) == pytest.approx(cm * 10)
     with pytest.raises(ValueError):
         nominal_sensor_length_mm(SimpleNamespace(value=3.0, unit="cm"))
+
+
+def test_full_asic_area_values():
+    from module_test.sensor_area import strip_area_mm2
+    report = BrokenChannelReport()
+    report.sensor_lengths_mm = {1: 22., 2: 124., 3: 22.}
+    assert dict(report.full_asic_area_values("N")) == {
+        22.: 128 * strip_area_mm2(22., "N"),
+        124.: 128 * strip_area_mm2(124., "N")}
+    assert dict(report.full_asic_area_values("P"))[124.] > 128 * strip_area_mm2(124., "N")
+
+
+def test_area_plot_axes_and_markers(tmp_path, monkeypatch):
+    from matplotlib.figure import Figure
+    report = BrokenChannelReport()
+    report.modules = {1: "long", 2: "short"}
+    report.sensor_lengths_mm = {1: 124., 2: 22.}
+    report.channels = {(1, "N", c, "ASIC") for c in range(256)}
+    captured = []
+    def inspect(fig, path, **kwargs):
+        ax = fig.axes[0]
+        captured.append((path, ax.get_yscale(), ax.get_xlim(),
+                         [float(line.get_xdata()[0]) for line in ax.lines]))
+    monkeypatch.setattr(Figure, "savefig", inspect)
+    report.generate_area_histograms(tmp_path)
+    assert len(captured) == 15
+    for path, scale, limits, markers in captured:
+        assert scale == "log"
+        assert limits[1] >= max(markers)
+        if path.name == "all_reasons.png":
+            assert limits[1] >= report.get_module_area_distribution("N").max()
+        assert len(markers) == (4 if path.parent.name == "combined" else 2)

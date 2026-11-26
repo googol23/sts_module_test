@@ -2,6 +2,7 @@
 from math import cos, radians, isclose, isfinite
 
 STRIP_PITCH_MM = 0.058
+CHANNELS_PER_ASIC = 128
 STEREO_ANGLE_DEG = {"N": 0.0, "P": 7.5}
 
 

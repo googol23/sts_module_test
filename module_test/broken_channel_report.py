@@ -11,7 +11,7 @@ import numpy as np
 
 from .module_test import ModuleTestResult
 from . import plot_style as style
-from .sensor_area import nominal_sensor_length_mm, strip_area_mm2
+from .sensor_area import CHANNELS_PER_ASIC, nominal_sensor_length_mm, strip_area_mm2
 
 logger = logging.getLogger(__name__)
 CHANNELS = 1024
@@ -193,36 +193,54 @@ class BrokenChannelReport:
                          for address, count in zip(sorted(self.modules), counts)
                          if address in self.sensor_lengths_mm], dtype=float)
 
+    def full_asic_area_values(self, side: str) -> list[tuple[float, float]]:
+        """Nominal area of 128 inactive strips for each represented sensor length."""
+        return [(length, CHANNELS_PER_ASIC * strip_area_mm2(length, side))
+                for length in sorted(set(self.sensor_lengths_mm.values()))]
+
     @style.styled
     def generate_area_histograms(self, output_dir: Path, image_format="png"):
         from matplotlib.figure import Figure
         from matplotlib.backends.backend_agg import FigureCanvasAgg
-        from matplotlib.ticker import MaxNLocator
 
         for reason in [None, *self.reasons]:
             values = {side: self.get_module_area_distribution(side, reason) for side in SIDES}
             width = style.AREA_BIN_WIDTH_MM2
-            maximum = max([0.0, *(float(v.max()) for v in values.values() if v.size)])
+            references = {side: self.full_asic_area_values(side) for side in SIDES}
+            maximum = max([0.0, *(float(v.max()) for v in values.values() if v.size),
+                           *(area for refs in references.values() for _, area in refs)])
+            # Shared range across P, N and combined; include the full final bin.
+            bins = np.arange(max(2, int(np.ceil(maximum / width)) + 2)) * width - width / 2
             for group, sides in (("n_side", ("N",)), ("p_side", ("P",)),
                                  ("combined", ("N", "P"))):
                 fig = Figure(constrained_layout=True)
                 FigureCanvasAgg(fig)
                 ax = fig.subplots()
-                # Use regular equal-width bins centered at zero; smallest
-                # physical strip area exceeds the default half-bin width.
-                bins = np.arange(max(2, int(np.ceil(maximum / width)) + 2)) * width - width / 2
+                peak = 1
+                ax.set_yscale("log")
                 for side in sides:
                     counts = np.histogram(values[side], bins=bins)[0]
-                    ax.stairs(counts, bins, color=style.SIDE_COLORS[side],
+                    peak = max(peak, int(counts.max()))
+                    # NaN gaps suppress empty bins without inventing positive counts.
+                    visible = np.where(counts > 0, counts.astype(float), np.nan)
+                    ax.stairs(visible, bins, baseline=None, color=style.SIDE_COLORS[side],
                               label=f"{side.lower()}-side", **style.HISTOGRAM_STYLE)
+                    for length, area in references[side]:
+                        ax.axvline(area, color=style.SIDE_COLORS[side],
+                                   **style.AREA_ASIC_LINE_STYLE)
+                        ax.text(area, .97 if side == "N" else .77,
+                                f"{length:g} mm ({side})",
+                                transform=ax.get_xaxis_transform(), rotation=90,
+                                va="top", ha="right", color=style.SIDE_COLORS[side],
+                                fontsize=style.AREA_ASIC_LABEL_SIZE)
                 label = "All reasons" if reason is None else reason
                 ax.set_title(f"Estimated inactive strip area | {label}")
                 ax.set_xlabel("Inactive strip area per module side [mm²]")
                 ax.set_ylabel("Number of modules")
                 ax.set_xlim(bins[0], bins[-1])
-                ax.set_ylim(bottom=0)
-                ax.yaxis.set_major_locator(MaxNLocator(integer=True))
-                ax.legend(title=f"Geometry available: {len(self.sensor_lengths_mm)}/{len(self.modules)}")
+                ax.set_ylim(style.AREA_LOG_YMIN, max(2, peak * 1.5))
+                ax.legend(title=f"Geometry available: {len(self.sensor_lengths_mm)}/{len(self.modules)}\n"
+                                "Dotted: full ASIC (128 strips)")
                 folder = Path(output_dir) / "area_distribution" / group
                 folder.mkdir(parents=True, exist_ok=True)
                 fig.savefig(folder / f"{self._filename(reason)}.{image_format}")
