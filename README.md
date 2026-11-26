@@ -43,7 +43,12 @@ REMOTE_ROOT/
 
 ## Collect results
 
-Run the collector as a module so its package-relative imports resolve correctly:
+Run the collector with the Python interpreter from the installation environment above.
+Running from the source checkout alone does not make the sibling `sts_utils` package
+importable. If you see `ModuleNotFoundError: No module named 'sts_utils'`, install both
+packages as shown above, then verify with `python -m module_test.collect_results --help`.
+
+In a POSIX shell, keep the trailing `\` on every continued line except the last:
 
 ```sh
 python -m module_test.collect_results \

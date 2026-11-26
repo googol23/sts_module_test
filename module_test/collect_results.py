@@ -1,16 +1,15 @@
 import argparse
+import logging
 import os
 import re
 import subprocess
 import textwrap
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from datetime import datetime
 from io import StringIO
 from pathlib import Path
 from typing import Any, Callable, Iterator
-
-from datetime import datetime
-import logging
 
 log_dir = Path("log/")
 log_dir.mkdir(exist_ok=True)
@@ -19,9 +18,7 @@ logger = logging.getLogger("CollectResults")
 logger.setLevel(logging.DEBUG)
 logger.handlers.clear()
 
-formatter = logging.Formatter(
-    "%(asctime)s %(levelname)-8s %(message)s"
-)
+formatter = logging.Formatter("%(asctime)s %(levelname)-8s %(message)s")
 
 # timestamp prefix for file name
 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -44,8 +41,6 @@ from sts_utils import sts_naming
 
 from .index_builder import get_all_files, init_db
 from .module_test import ModuleTestResult, ValueErrorUnit
-
-
 
 # cbmstsgw02
 # stsdcs03
@@ -111,6 +106,7 @@ def serve_sshfs(host: str, remote_path: str, mount_point: str = "test_result") -
         raise RuntimeError(f"Failed to mount {host}:{remote_path} on {mount_point}")
 
     return Path(mount_point)
+
 
 def process(path: str | Path) -> None | tuple[int, ModuleTestResult | None]:
     """
@@ -188,10 +184,13 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     try:
-        root = Path(TEST_RESULT_PATH)
+        if args.host is not None and not args.path:
+            parser.error("--path is required when --host is set")
 
-        if not root.exists():
-            raise ValueError(f"Directory does not exist: {root}")
+        if args.host is None:
+            root = Path(TEST_RESULT_PATH)
+            if not root.is_dir():
+                raise ValueError(f"Directory does not exist: {root}")
 
         conn = init_db(args.db)
         paths = get_all_files(conn)
@@ -199,10 +198,8 @@ if __name__ == "__main__":
         # Mount remoted if needed and provide path relative to mount point
         if args.host is not None:
             mount_point = serve_sshfs(args.host, args.path)
-            mount_point = "test_result/"
 
             paths = [mount_point / Path(rf).relative_to(args.path) for rf in paths]
-
 
         logger.info(f"Found {len(paths)} test file to be collected...")
         logger.info("Starting processing files ...")
@@ -246,8 +243,12 @@ if __name__ == "__main__":
                 continue
 
             # Write inactive channel lines
-            faulty_channels = [chn for chn in module_test_result.list_broken_channels_n_side]
-            faulty_channels.extend([2047 - chn for chn in module_test_result.list_broken_channels_p_side])
+            faulty_channels = [
+                chn for chn in module_test_result.list_broken_channels_n_side
+            ]
+            faulty_channels.extend(
+                [2047 - chn for chn in module_test_result.list_broken_channels_p_side]
+            )
             for chn in faulty_channels:
                 channel_mask_file.write(f"{address} {chn}\n")
 
@@ -257,8 +258,14 @@ if __name__ == "__main__":
             gain_n_side = module_test_result.average_adc_gain_n_side
             gain_p_side = module_test_result.average_adc_gain_p_side
 
-            charge_calib_file.write(asic_par_input(address, 0, -1, enc_n_side.value, gain_n_side.value) + "\n")
-            charge_calib_file.write(asic_par_input(address, 1, -1, enc_p_side.value, gain_p_side.value) + "\n")
+            charge_calib_file.write(
+                asic_par_input(address, 0, -1, enc_n_side.value, gain_n_side.value)
+                + "\n"
+            )
+            charge_calib_file.write(
+                asic_par_input(address, 1, -1, enc_p_side.value, gain_p_side.value)
+                + "\n"
+            )
 
         logger.info(f"Dumping address building to: {ADDRESS_DUMP_FILE}")
         with open(ADDRESS_DUMP_FILE, "w") as dump:
