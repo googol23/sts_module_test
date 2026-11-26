@@ -9,8 +9,8 @@ import matplotlib.pyplot as plt
 
 from multiprocessing import Pool, cpu_count, current_process
 
-import mplhep
-mplhep.style.use("ATLAS")
+from module_test import plot_style as style
+style.apply_style()
 
 from pscan.fit_err_fnc import fit_s_curve
 from pscan.fit_err_fnc import err_func
@@ -253,11 +253,11 @@ def process_p_scan_files(source_dir = "sources", files_idx=None, q_lim=68):
                 plot_s_curve(chn, adc_list[:-1], r, df)
                 plot_linear_fit(chn, r)
 
-            fig, axs = plt.subplots(1, 2, figsize=(9, 4))
+            fig, axs = plt.subplots(1, 2)
             h_thre = plot_histogram(thre, 'Thr', "Entries", axs[0])
             h_gain = plot_histogram(gain, 'gain', "Entries", axs[1])
             plt.tight_layout()
-            plt.savefig(f"images/{f_name}_thr_gain.png", dpi=300)
+            plt.savefig(f"images/{f_name}_thr_gain.png")
             plt.close()
 
     table_labels = ['File', 'Thr (e)', 'Thr_std (e)', 'Gain (e/LSB)', 'Gain_std (e/LSB)', 'ENC (e)', 'ENC_std (e)', 'Q_score', 'Odd_failed', 'Even_failed']

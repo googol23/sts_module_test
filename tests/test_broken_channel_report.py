@@ -39,10 +39,19 @@ def test_distributions_and_exports(tmp_path):
     report.export_summary(tmp_path)
     report.generate_histograms(tmp_path)
     assert (tmp_path / "statistics.csv").exists()
-    assert len(list(tmp_path.rglob("*.png"))) == 20
+    assert len(list(tmp_path.rglob("*.png"))) == 25
 
 
 def test_empty_report():
     report = BrokenChannelReport()
     assert report.get_channel_distribution("P").shape == (1024,)
     assert report.get_module_distribution("N").size == 0
+
+
+def test_paired_thresholds():
+    report = BrokenChannelReport()
+    report.modules = {1: "a", 2: "b", 3: "c"}
+    report.channels = {(1, "N", c, "NAR") for c in range(16)}
+    report.channels.update((2, "P", c, "NAR") for c in range(32))
+    assert report.threshold_statistics() == {8: (1, 3), 16: (2, 3)}
+    assert report.threshold_statistics("SENS") == {8: (3, 3), 16: (3, 3)}

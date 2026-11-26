@@ -10,6 +10,7 @@ from pathlib import Path
 import numpy as np
 
 from .module_test import ModuleTestResult
+from . import plot_style as style
 
 logger = logging.getLogger(__name__)
 CHANNELS = 1024
@@ -83,6 +84,7 @@ class BrokenChannelReport:
             return slug
         return slug[:60] + "_" + hashlib.sha256(reason.encode()).hexdigest()[:12]
 
+    @style.styled
     def generate_histograms(self, output_dir: Path, histogram_type="both", image_format="png"):
         from matplotlib.figure import Figure
         from matplotlib.backends.backend_agg import FigureCanvasAgg
@@ -94,27 +96,81 @@ class BrokenChannelReport:
                     continue
                 folder = Path(output_dir) / f"{kind}_distribution" / f"{side.lower()}_side"
                 folder.mkdir(parents=True, exist_ok=True)
-                fig = Figure(figsize=(12, 5), layout="constrained")
+                fig = Figure(constrained_layout=True)
                 FigureCanvasAgg(fig)
                 ax = fig.subplots()
                 if kind == "channel":
                     counts = self.get_channel_distribution(side, reason)
-                    ax.stairs(counts, np.arange(CHANNELS + 1) - .5, fill=True)
+                    ax.stairs(counts, np.arange(CHANNELS + 1) - .5, color=style.SIDE_COLORS[side], **style.HISTOGRAM_STYLE)
                     for boundary in range(128, CHANNELS, 128):
-                        ax.axvline(boundary - .5, color="gray", linestyle="--", alpha=.5)
+                        ax.axvline(boundary - .5, **style.ASIC_BOUNDARY)
                     ax.set_xlim(-.5, CHANNELS - .5)
                     ax.set_xlabel("Source channel ID")
                 else:
                     values = self.get_module_distribution(side, reason)
                     counts = np.bincount(values, minlength=1)
-                    ax.stairs(counts, np.arange(len(counts) + 1) - .5, fill=True)
+                    ax.stairs(counts, np.arange(len(counts) + 1) - .5, color=style.SIDE_COLORS[side], **style.HISTOGRAM_STYLE)
                     ax.set_xlim(-.5, len(counts) - .5)
                     ax.set_xlabel("Broken channels per module")
                 ax.set_ylabel("Number of modules")
                 ax.set_ylim(bottom=0)
                 ax.set_title(f"{side}-side | {label} | Modules: {len(self.modules)}")
-                fig.savefig(folder / f"{self._filename(reason)}.{image_format}", dpi=150)
+                fig.savefig(folder / f"{self._filename(reason)}.{image_format}", dpi=None)
                 fig.clear()
+
+        if histogram_type in ("both", "module"):
+            for reason in [None, *self.reasons]:
+                self.plot_combined_module_distribution(output_dir, reason, image_format)
+
+    def threshold_statistics(self, reason: str | None = None):
+        """Paired module counts; strict average-side thresholds."""
+        total = self.get_module_distribution("N", reason) + self.get_module_distribution("P", reason)
+        return {limit: (int(np.count_nonzero(total < 2 * limit)), len(total))
+                for limit in style.THRESHOLD_STYLES}
+
+    @style.styled
+    def plot_combined_module_distribution(self, output_dir: Path,
+                                          reason: str | None = None,
+                                          image_format: str = "png"):
+        from matplotlib.figure import Figure
+        from matplotlib.backends.backend_agg import FigureCanvasAgg
+        from matplotlib.ticker import MaxNLocator
+
+        values = {side: self.get_module_distribution(side, reason) for side in SIDES}
+        maximum = max([style.PRODUCTION_TARGET, *style.THRESHOLD_STYLES,
+                       *(int(v.max()) for v in values.values() if v.size)])
+        edges = np.arange(maximum + 2) - .5
+        fig = Figure(constrained_layout=True)
+        FigureCanvasAgg(fig)
+        ax = fig.subplots()
+        for side in ("N", "P"):
+            counts = np.histogram(values[side], bins=edges)[0]
+            ax.stairs(counts, edges, color=style.SIDE_COLORS[side],
+                      label=f"{side.lower()}-side", **style.HISTOGRAM_STYLE)
+        for limit, (passed, n) in self.threshold_statistics(reason).items():
+            fraction = f"{100 * passed / n:.1f}%" if n else "n/a"
+            ax.axvline(limit, label=f"Total broken / 2 < {limit}: {fraction} ({passed}/{n} modules)",
+                       **style.THRESHOLD_STYLES[limit])
+        if reason is None:
+            ax.text(style.PRODUCTION_TARGET + 0.5, .90,
+                    f"Production target ({style.PRODUCTION_TARGET} channels, ~{100 * style.PRODUCTION_TARGET / CHANNELS:.1f}%)",
+                    transform=ax.get_xaxis_transform(), rotation=90, va="top")
+        title = "Distribution of broken channels per module side"
+        if reason is not None:
+            title += f" — {reason}"
+        ax.set_title(title)
+        ax.set_xlabel("Number of broken channels per module side")
+        ax.set_ylabel("Number of modules")
+        ax.set_xlim(-.5, maximum + .5)
+        ax.set_ylim(bottom=0)
+        ax.yaxis.set_major_locator(MaxNLocator(integer=True))
+        ax.legend(loc="upper right")
+        folder = Path(output_dir) / "module_distribution" / "combined"
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder / f"{self._filename(reason)}.{image_format}"
+        fig.savefig(path)
+        fig.clear()
+        return path
 
     def export_summary(self, output_dir: Path):
         folder = Path(output_dir)
