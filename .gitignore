@@ -24,3 +24,6 @@ module_test/dump_digi.txt
 # Generated module-test parameter files
 channelMask.par
 chargeCalibration.par
+
+
+token
