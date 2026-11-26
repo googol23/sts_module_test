@@ -181,6 +181,11 @@ if __name__ == "__main__":
         help="Data base for files index (avoid file ssytem scanning)",
     )
 
+    parser.add_argument("--broken-channel-report", action="store_true")
+    parser.add_argument("--histogram-type", choices=("channel", "module", "both"), default="both")
+    parser.add_argument("--report-dir", type=Path, default=Path("summary/broken_channels"))
+    parser.add_argument("--report-format", choices=("png", "pdf", "svg"), default="png")
+
     args = parser.parse_args()
 
     try:
@@ -233,6 +238,11 @@ if __name__ == "__main__":
         """)
         )
 
+        report = None
+        if args.broken_channel_report:
+            from .broken_channel_report import BrokenChannelReport
+            report = BrokenChannelReport()
+
         for res in results:
             if res is None:
                 continue
@@ -241,6 +251,9 @@ if __name__ == "__main__":
 
             if module_test_result is None:
                 continue
+
+            if report is not None:
+                report.add_result(address, module_test_result)
 
             # Write inactive channel lines
             faulty_channels = [
@@ -271,6 +284,12 @@ if __name__ == "__main__":
         with open(ADDRESS_DUMP_FILE, "w") as dump:
             for k, v in sts_naming.STS_NAME_TO_ADDRESS_DUMP.items():
                 dump.write(f"{k}\t{v}\n")
+
+        channel_mask_file.close()
+        charge_calib_file.close()
+        if report is not None:
+            report.export_summary(args.report_dir)
+            report.generate_histograms(args.report_dir, args.histogram_type, args.report_format)
 
     except KeyboardInterrupt:
         logger.info("Aborting ...")

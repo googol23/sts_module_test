@@ -79,3 +79,9 @@ directory. Those directories are ignored by Git.
 ```sh
 python -m pytest -q
 ```
+
+## Broken-channel reporting
+
+Add `--broken-channel-report` to the collector command to generate both channel-position and broken-channels-per-module histograms, independently for P and N sides and each reason. Use `--histogram-type channel|module|both`, `--report-dir PATH`, and `--report-format png|pdf|svg` to customize output. Defaults: both, summary/broken_channels, png.
+
+CSV exports include all successfully parsed modules, individual classifications, per-module counts and statistics. Empty reason in summary/count tables denotes all reasons. Missing source reasons are UNKNOWN; new reason labels are accepted. Channel indices use source numbering (0–1023); out-of-range entries are warned and excluded from reports only. Duplicate module addresses use the first result for reporting; repeated channel/reason pairs are counted once. A channel with conflicting classifications contributes once to the all-reasons total and once to each matching reason. Zero-count modules are included in module distributions. Existing masks, calibration, parser signatures and dataclass fields are unchanged.

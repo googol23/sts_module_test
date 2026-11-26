@@ -36,6 +36,25 @@ def parse_int_list(x: str) -> list[int]:
 def parse_broken_channels(values: str) -> list[int]:
     return [ int(v.split("(")[0].strip()) for v in values.split(",") if len(v) != 0 ]
 
+@dataclass(frozen=True)
+class BrokenChannel:
+    channel: int
+    reason: str | None = None
+
+
+def parse_broken_channel_details(values: str) -> list[BrokenChannel]:
+    """Preserve reason labels without changing the legacy integer parser."""
+    result = []
+    for token in values.split(","):
+        if not token.strip():
+            continue
+        channel = int(token.split("(")[0].strip())
+        match = re.search(r"\(([^()]*)\)", token)
+        reason = match.group(1).strip() if match else ""
+        result.append(BrokenChannel(channel, reason or None))
+    return result
+
+
 NUMBER_RE = r'[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?'
 VALUE_RE = re.compile(rf'''
 ^\s*
@@ -124,10 +143,25 @@ class ModuleTestResult:
     
     }
 
+    @property
+    def broken_channels_n_side(self) -> list[BrokenChannel]:
+        return list(getattr(self, "_broken_details", {}).get(
+            "LIST_BROKEN_CHANNELS_N-side",
+            [BrokenChannel(c) for c in self.list_broken_channels_n_side],
+        ))
+
+    @property
+    def broken_channels_p_side(self) -> list[BrokenChannel]:
+        return list(getattr(self, "_broken_details", {}).get(
+            "LIST_BROKEN_CHANNELS_P-side",
+            [BrokenChannel(c) for c in self.list_broken_channels_p_side],
+        ))
+
     @classmethod
     def from_file(cls, file_path: str) -> Self:
         """Parses a file and returns an instantiated ModuleTestResult."""
         parsed_dict: dict[str, Any] = {}
+        details = {}
         with open(file_path, "r", encoding="utf-8") as file:
             for line in file:
                 line = line.strip()
@@ -149,6 +183,8 @@ class ModuleTestResult:
     
                 try:
                     parsed_dict[par_name] = parser(values)
+                    if par_name in ("LIST_BROKEN_CHANNELS_N-side", "LIST_BROKEN_CHANNELS_P-side"):
+                        details[par_name] = parse_broken_channel_details(values)
                 except Exception as e:
                     raise ValueError(f"{e}, {par_name}") from e
     
@@ -158,7 +194,7 @@ class ModuleTestResult:
     
             # Ensure defaults exist for missing keys to prevent KeyError crashes
             # Casting count variables to integers directly during mapping
-            return cls(
+            result = cls(
                 lab_id=parsed_dict.get("LAB_ID", ""),
                 date=parsed_dict.get("DATE", ""),
                 operator_id=parsed_dict.get("OPERATOR_ID", ""),
@@ -190,6 +226,8 @@ class ModuleTestResult:
                 no_broken_channels_even=parsed_dict.get("EVEN", 0), # TODO: fix parsers
                 raw=parsed_dict,
             )
+            result._broken_details = details
+            return result
 
 
 if __name__ == "__main__":
