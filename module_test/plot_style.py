@@ -35,6 +35,7 @@ ANNOTATION_SIZE = 8
 ANNOTATION_ALPHA = 0.7
 HISTOGRAM_STYLE = {"fill": False, "linewidth": 2.0}
 PRODUCTION_TARGET = 16
+AREA_BIN_WIDTH_MM2 = 1.0
 
 
 def apply_style():

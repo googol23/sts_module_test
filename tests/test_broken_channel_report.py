@@ -55,3 +55,27 @@ def test_paired_thresholds():
     report.channels.update((2, "P", c, "NAR") for c in range(32))
     assert report.threshold_statistics() == {8: (1, 3), 16: (2, 3)}
     assert report.threshold_statistics("SENS") == {8: (3, 3), 16: (3, 3)}
+
+
+def test_area_distributions(tmp_path):
+    from module_test.sensor_area import strip_area_mm2
+    report = BrokenChannelReport()
+    report.modules = {1: "short", 2: "long", 3: "unknown", 4: "clean"}
+    report.sensor_lengths_mm = {1: 22., 2: 124., 4: 42.}
+    report.channels = {(1, "N", 2, "SENS"), (2, "N", 2, "SENS"), (2, "P", 3, "NAR")}
+    np.testing.assert_allclose(report.get_module_area_distribution("N"), [1.276, 7.192, 0])
+    np.testing.assert_allclose(report.get_module_area_distribution("P", "NAR"), [0, strip_area_mm2(124, "P"), 0])
+    report.export_summary(tmp_path)
+    report.generate_area_histograms(tmp_path)
+    assert len(list((tmp_path / "area_distribution").rglob("*.png"))) == 15
+    assert (tmp_path / "module_areas.csv").exists()
+
+
+def test_nominal_geometry():
+    import pytest
+    pytest.importorskip("sts_geo_layout")
+    from module_test.sensor_area import nominal_sensor_length_mm
+    for cm in (2.2, 4.2, 6.2, 12.4):
+        assert nominal_sensor_length_mm(SimpleNamespace(value=cm, unit="cm")) == pytest.approx(cm * 10)
+    with pytest.raises(ValueError):
+        nominal_sensor_length_mm(SimpleNamespace(value=3.0, unit="cm"))

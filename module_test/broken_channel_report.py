@@ -11,6 +11,7 @@ import numpy as np
 
 from .module_test import ModuleTestResult
 from . import plot_style as style
+from .sensor_area import nominal_sensor_length_mm, strip_area_mm2
 
 logger = logging.getLogger(__name__)
 CHANNELS = 1024
@@ -28,6 +29,8 @@ class BrokenChannelReport:
 
     def __init__(self):
         self.modules: dict[int, str] = {}
+        self.sensor_lengths_mm: dict[int, float] = {}
+        self._geometry_unavailable = False
         self.channels: set[tuple[int, str, int, str]] = set()
 
     def add_result(self, address: int, result: ModuleTestResult) -> None:
@@ -35,6 +38,15 @@ class BrokenChannelReport:
             logger.warning("Duplicate module address %s; ignoring later report result", address)
             return
         self.modules[address] = result.module_id
+        if not self._geometry_unavailable and getattr(result, "sensor_size", None) is not None:
+            try:
+                self.sensor_lengths_mm[address] = nominal_sensor_length_mm(result.sensor_size)
+            except ImportError:
+                logger.warning("Area plots require sts-geo-layout; install the optional area dependency")
+                self._geometry_unavailable = True
+            except (ValueError, TypeError, AttributeError) as exc:
+                logger.warning("%s: invalid sensor size; excluded from area report: %s",
+                               result.module_id, exc)
         for side in SIDES:
             entries = getattr(result, f"broken_channels_{side.lower()}_side")
             declared = getattr(result, f"no_broken_channels_{side.lower()}_side")
@@ -121,6 +133,8 @@ class BrokenChannelReport:
         if histogram_type in ("both", "module"):
             for reason in [None, *self.reasons]:
                 self.plot_combined_module_distribution(output_dir, reason, image_format)
+            if self.sensor_lengths_mm:
+                self.generate_area_histograms(output_dir, image_format)
 
     def threshold_statistics(self, reason: str | None = None):
         """Paired module counts; strict average-side thresholds."""
@@ -172,6 +186,48 @@ class BrokenChannelReport:
         fig.clear()
         return path
 
+    def get_module_area_distribution(self, side: str, reason: str | None = None) -> np.ndarray:
+        """Area in mm² for each module with resolved geometry, sorted by address."""
+        counts = self.get_module_distribution(side, reason)
+        return np.array([count * strip_area_mm2(self.sensor_lengths_mm[address], side)
+                         for address, count in zip(sorted(self.modules), counts)
+                         if address in self.sensor_lengths_mm], dtype=float)
+
+    @style.styled
+    def generate_area_histograms(self, output_dir: Path, image_format="png"):
+        from matplotlib.figure import Figure
+        from matplotlib.backends.backend_agg import FigureCanvasAgg
+        from matplotlib.ticker import MaxNLocator
+
+        for reason in [None, *self.reasons]:
+            values = {side: self.get_module_area_distribution(side, reason) for side in SIDES}
+            width = style.AREA_BIN_WIDTH_MM2
+            maximum = max([0.0, *(float(v.max()) for v in values.values() if v.size)])
+            for group, sides in (("n_side", ("N",)), ("p_side", ("P",)),
+                                 ("combined", ("N", "P"))):
+                fig = Figure(constrained_layout=True)
+                FigureCanvasAgg(fig)
+                ax = fig.subplots()
+                # Use regular equal-width bins centered at zero; smallest
+                # physical strip area exceeds the default half-bin width.
+                bins = np.arange(max(2, int(np.ceil(maximum / width)) + 2)) * width - width / 2
+                for side in sides:
+                    counts = np.histogram(values[side], bins=bins)[0]
+                    ax.stairs(counts, bins, color=style.SIDE_COLORS[side],
+                              label=f"{side.lower()}-side", **style.HISTOGRAM_STYLE)
+                label = "All reasons" if reason is None else reason
+                ax.set_title(f"Estimated inactive strip area | {label}")
+                ax.set_xlabel("Inactive strip area per module side [mm²]")
+                ax.set_ylabel("Number of modules")
+                ax.set_xlim(bins[0], bins[-1])
+                ax.set_ylim(bottom=0)
+                ax.yaxis.set_major_locator(MaxNLocator(integer=True))
+                ax.legend(title=f"Geometry available: {len(self.sensor_lengths_mm)}/{len(self.modules)}")
+                folder = Path(output_dir) / "area_distribution" / group
+                folder.mkdir(parents=True, exist_ok=True)
+                fig.savefig(folder / f"{self._filename(reason)}.{image_format}")
+                fig.clear()
+
     def export_summary(self, output_dir: Path):
         folder = Path(output_dir)
         folder.mkdir(parents=True, exist_ok=True)
@@ -201,5 +257,15 @@ class BrokenChannelReport:
                           int(values.max()) if n else "",
                           affected / n if n else "", 1 - affected / n if n else ""))
         write("module_counts.csv", ("address", "module_id", "side", "reason", "count"), counts)
+        area_rows = []
+        for side, reason in self._groups():
+            values = self.get_module_distribution(side, reason)
+            for address, count in zip(sorted(self.modules), values):
+                length = self.sensor_lengths_mm.get(address)
+                area_rows.append((address, self.modules[address], side, reason or "",
+                                  int(count), length if length is not None else "",
+                                  count * strip_area_mm2(length, side) if length is not None else ""))
+        write("module_areas.csv", ("address", "module_id", "side", "reason", "count",
+                                  "sensor_length_mm", "estimated_inactive_area_mm2"), area_rows)
         write("statistics.csv", ("side", "reason", "modules", "affected_modules", "broken_channels",
                                 "mean", "std", "median", "max", "affected_fraction", "zero_fraction"), stats)

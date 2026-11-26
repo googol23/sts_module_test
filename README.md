@@ -89,3 +89,15 @@ CSV exports include all successfully parsed modules, individual classifications,
 ### Plot cosmetics and combined distributions
 
 All plotting cosmetics are configured in `module_test/plot_style.py` (fonts, canvas size, DPI, colors, grid and line styles). Combined P/N module distributions are written to `module_distribution/combined/`, for all reasons and each individual reason. Threshold fractions use paired module counts: (N + P) / 2 strictly below 8 or 16, including modules with zero failures. The 16-channel production target annotation is shown on the all-reasons plot only.
+
+### Estimated inactive strip area
+
+Install the optional geometry dependency from adjacent checkouts (in the same environment):
+
+```sh
+python -m pip install -e ../sts_geo_layout -e '.[area]'
+```
+
+The existing reporting command generates additional per-side and combined area distributions for every reason when nominal sensor lengths can be resolved. SENSOR_SIZE from each module test is matched in mm to `sts_geo_layout.SensorType.size_xy()`; no assembly database connection is required. Missing or unsupported dimensions are excluded from area histograms only, and exported with blank area in `module_areas.csv`. The legend shows the geometry coverage. If no geometry is available, area plots are skipped, while existing count plots remain available.
+
+The first-order estimate is broken strip count × 0.058 mm × nominal sensor length / cos(stereo angle), with 0 degrees for N and 7.5 degrees for P. It assumes pitch perpendicular to the strip, ignores active margins, edge clipping and routing, and represents side-specific inactive strip coverage, not the physical union of dead regions on both sides. Count thresholds are not reused as area thresholds. Common area bins (default 1 mm²) and cosmetics are configured in plot_style.py. Area plots are stored under area_distribution/{n_side,p_side,combined}/.
