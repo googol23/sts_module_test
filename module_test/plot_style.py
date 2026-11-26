@@ -37,6 +37,7 @@ HISTOGRAM_STYLE = {"fill": False, "linewidth": 2.0}
 PRODUCTION_TARGET = 16
 AREA_BIN_WIDTH_MM2 = 1.0
 AREA_PERCENT_BIN_WIDTH = 0.1
+AREA_Y_SCALE = "log"  # "log" or "linear"
 AREA_LOG_YMIN = 0.8
 AREA_ASIC_LINE_STYLE = {"linestyle": ":", "linewidth": 1.5, "alpha": 0.8}
 AREA_ASIC_LABEL_SIZE = 10

@@ -139,3 +139,35 @@ def test_area_percent_distribution(tmp_path, monkeypatch):
         assert markers == (2 if path.parent.name == "combined" else 1)
         if path.name == "all_reasons.png":
             assert limits[1] >= report.get_module_area_percent_distribution("P").max()
+
+
+def test_area_y_scale_configuration(tmp_path, monkeypatch):
+    from matplotlib.figure import Figure
+    from module_test import plot_style
+    report = BrokenChannelReport()
+    report.modules = {1: "module"}
+    report.sensor_lengths_mm = {1: 22.}
+    report.channels = {(1, "N", 0, "ASIC")}
+    captured = []
+
+    def inspect(fig, path, **kwargs):
+        ax = fig.axes[0]
+        captured.append((ax.get_yscale(), ax.get_ylim()[0],
+                         ax.patches[0].get_data().values))
+
+    monkeypatch.setattr(Figure, "savefig", inspect)
+    for scale in ("linear", "log"):
+        captured.clear()
+        monkeypatch.setattr(plot_style, "AREA_Y_SCALE", scale)
+        report.generate_area_histograms(tmp_path)
+        report.generate_area_percent_histograms(tmp_path)
+        assert len(captured) == 30
+        for actual, ymin, values in captured:
+            assert actual == scale
+            if scale == "linear":
+                assert ymin == 0
+                assert np.all(np.isfinite(values))
+                assert np.any(values == 0)
+            else:
+                assert ymin == plot_style.AREA_LOG_YMIN
+                assert np.any(np.isnan(values))

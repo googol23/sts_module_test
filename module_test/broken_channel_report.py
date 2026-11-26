@@ -223,6 +223,11 @@ class BrokenChannelReport:
         from matplotlib.figure import Figure
         from matplotlib.backends.backend_agg import FigureCanvasAgg
 
+        y_scale = style.AREA_Y_SCALE
+        if y_scale not in ("log", "linear"):
+            raise ValueError(f"Unsupported AREA_Y_SCALE: {y_scale!r}")
+        logarithmic = y_scale == "log"
+
         for reason in [None, *self.reasons]:
             if percent:
                 values = {side: self.get_module_area_percent_distribution(side, reason)
@@ -243,13 +248,14 @@ class BrokenChannelReport:
                 FigureCanvasAgg(fig)
                 ax = fig.subplots()
                 peak = 1
-                ax.set_yscale("log")
+                ax.set_yscale(y_scale)
                 for side in sides:
                     counts = np.histogram(values[side], bins=bins)[0]
                     peak = max(peak, int(counts.max()))
-                    # NaN gaps suppress empty bins without inventing positive counts.
-                    visible = np.where(counts > 0, counts.astype(float), np.nan)
-                    ax.stairs(visible, bins, baseline=None, color=style.SIDE_COLORS[side],
+                    # Suppress empty bins only on the logarithmic axis.
+                    visible = np.where(counts > 0, counts.astype(float), np.nan) if logarithmic else counts
+                    ax.stairs(visible, bins, baseline=None if logarithmic else 0,
+                              color=style.SIDE_COLORS[side],
                               label=f"{side.lower()}-side", **style.HISTOGRAM_STYLE)
                     for length, area in references[side]:
                         ax.axvline(area, color=style.SIDE_COLORS[side],
@@ -265,7 +271,12 @@ class BrokenChannelReport:
                               "Inactive strip area per module side [mm²]")
                 ax.set_ylabel("Number of modules")
                 ax.set_xlim(bins[0], bins[-1])
-                ax.set_ylim(style.AREA_LOG_YMIN, max(2, peak * 1.5))
+                if logarithmic:
+                    ax.set_ylim(style.AREA_LOG_YMIN, max(2, peak * 1.5))
+                else:
+                    from matplotlib.ticker import MaxNLocator
+                    ax.set_ylim(0, max(2, peak * 1.1))
+                    ax.yaxis.set_major_locator(MaxNLocator(integer=True))
                 ax.legend(title=f"Geometry available: {len(self.sensor_lengths_mm)}/{len(self.modules)}\n"
                                 "Dotted: full ASIC (128 strips)")
                 folder = Path(output_dir) / ("area_percent_distribution" if percent else "area_distribution") / group
