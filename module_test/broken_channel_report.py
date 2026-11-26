@@ -11,7 +11,8 @@ import numpy as np
 
 from .module_test import ModuleTestResult
 from . import plot_style as style
-from .sensor_area import CHANNELS_PER_ASIC, nominal_sensor_length_mm, strip_area_mm2
+from .sensor_area import (CHANNELS_PER_ASIC, NOMINAL_SENSOR_WIDTH_MM,
+                          inactive_area_percent, nominal_sensor_length_mm, strip_area_mm2)
 
 logger = logging.getLogger(__name__)
 CHANNELS = 1024
@@ -135,6 +136,7 @@ class BrokenChannelReport:
                 self.plot_combined_module_distribution(output_dir, reason, image_format)
             if self.sensor_lengths_mm:
                 self.generate_area_histograms(output_dir, image_format)
+                self.generate_area_percent_histograms(output_dir, image_format)
 
     def threshold_statistics(self, reason: str | None = None):
         """Paired module counts; strict average-side thresholds."""
@@ -198,15 +200,39 @@ class BrokenChannelReport:
         return [(length, CHANNELS_PER_ASIC * strip_area_mm2(length, side))
                 for length in sorted(set(self.sensor_lengths_mm.values()))]
 
+    def get_module_area_percent_distribution(self, side: str, reason: str | None = None) -> np.ndarray:
+        """Percentage of full nominal sensor face, in sorted module order."""
+        counts = self.get_module_distribution(side, reason)
+        return np.array([inactive_area_percent(count, self.sensor_lengths_mm[address], side)
+                         for address, count in zip(sorted(self.modules), counts)
+                         if address in self.sensor_lengths_mm], dtype=float)
+
+    def full_asic_area_percent(self, side: str) -> float:
+        """Full ASIC fraction; sensor length cancels under the nominal model."""
+        return inactive_area_percent(CHANNELS_PER_ASIC, 1.0, side)
+
     @style.styled
     def generate_area_histograms(self, output_dir: Path, image_format="png"):
+        self._generate_area_histograms(output_dir, image_format, percent=False)
+
+    @style.styled
+    def generate_area_percent_histograms(self, output_dir: Path, image_format="png"):
+        self._generate_area_histograms(output_dir, image_format, percent=True)
+
+    def _generate_area_histograms(self, output_dir, image_format, *, percent):
         from matplotlib.figure import Figure
         from matplotlib.backends.backend_agg import FigureCanvasAgg
 
         for reason in [None, *self.reasons]:
-            values = {side: self.get_module_area_distribution(side, reason) for side in SIDES}
-            width = style.AREA_BIN_WIDTH_MM2
-            references = {side: self.full_asic_area_values(side) for side in SIDES}
+            if percent:
+                values = {side: self.get_module_area_percent_distribution(side, reason)
+                          for side in SIDES}
+                width = style.AREA_PERCENT_BIN_WIDTH
+                references = {side: [(None, self.full_asic_area_percent(side))] for side in SIDES}
+            else:
+                values = {side: self.get_module_area_distribution(side, reason) for side in SIDES}
+                width = style.AREA_BIN_WIDTH_MM2
+                references = {side: self.full_asic_area_values(side) for side in SIDES}
             maximum = max([0.0, *(float(v.max()) for v in values.values() if v.size),
                            *(area for refs in references.values() for _, area in refs)])
             # Shared range across P, N and combined; include the full final bin.
@@ -229,19 +255,20 @@ class BrokenChannelReport:
                         ax.axvline(area, color=style.SIDE_COLORS[side],
                                    **style.AREA_ASIC_LINE_STYLE)
                         ax.text(area, .97 if side == "N" else .77,
-                                f"{length:g} mm ({side})",
+                                (f"{area:.2f}% ({side})" if percent else f"{length:g} mm ({side})"),
                                 transform=ax.get_xaxis_transform(), rotation=90,
                                 va="top", ha="right", color=style.SIDE_COLORS[side],
                                 fontsize=style.AREA_ASIC_LABEL_SIZE)
                 label = "All reasons" if reason is None else reason
                 ax.set_title(f"Estimated inactive strip area | {label}")
-                ax.set_xlabel("Inactive strip area per module side [mm²]")
+                ax.set_xlabel("Inactive area / total sensor area [%]" if percent else
+                              "Inactive strip area per module side [mm²]")
                 ax.set_ylabel("Number of modules")
                 ax.set_xlim(bins[0], bins[-1])
                 ax.set_ylim(style.AREA_LOG_YMIN, max(2, peak * 1.5))
                 ax.legend(title=f"Geometry available: {len(self.sensor_lengths_mm)}/{len(self.modules)}\n"
                                 "Dotted: full ASIC (128 strips)")
-                folder = Path(output_dir) / "area_distribution" / group
+                folder = Path(output_dir) / ("area_percent_distribution" if percent else "area_distribution") / group
                 folder.mkdir(parents=True, exist_ok=True)
                 fig.savefig(folder / f"{self._filename(reason)}.{image_format}")
                 fig.clear()
@@ -282,8 +309,11 @@ class BrokenChannelReport:
                 length = self.sensor_lengths_mm.get(address)
                 area_rows.append((address, self.modules[address], side, reason or "",
                                   int(count), length if length is not None else "",
-                                  count * strip_area_mm2(length, side) if length is not None else ""))
+                                  count * strip_area_mm2(length, side) if length is not None else "",
+                                  NOMINAL_SENSOR_WIDTH_MM * length if length is not None else "",
+                                  inactive_area_percent(count, length, side) if length is not None else ""))
         write("module_areas.csv", ("address", "module_id", "side", "reason", "count",
-                                  "sensor_length_mm", "estimated_inactive_area_mm2"), area_rows)
+                                  "sensor_length_mm", "estimated_inactive_area_mm2",
+                                  "total_sensor_area_mm2", "estimated_inactive_area_percent"), area_rows)
         write("statistics.csv", ("side", "reason", "modules", "affected_modules", "broken_channels",
                                 "mean", "std", "median", "max", "affected_fraction", "zero_fraction"), stats)

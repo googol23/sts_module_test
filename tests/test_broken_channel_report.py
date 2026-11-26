@@ -111,3 +111,31 @@ def test_area_plot_axes_and_markers(tmp_path, monkeypatch):
         if path.name == "all_reasons.png":
             assert limits[1] >= report.get_module_area_distribution("N").max()
         assert len(markers) == (4 if path.parent.name == "combined" else 2)
+
+
+def test_area_percent_distribution(tmp_path, monkeypatch):
+    from matplotlib.figure import Figure
+    from module_test.sensor_area import inactive_area_percent
+    report = BrokenChannelReport()
+    report.modules = {1: "short", 2: "long", 3: "clean", 4: "unknown"}
+    report.sensor_lengths_mm = {1: 22., 2: 124., 3: 42.}
+    report.channels = {(a, s, c, "ASIC") for a in (1, 2) for s in ("N", "P")
+                       for c in range(256)}
+    for side in ("N", "P"):
+        expected = inactive_area_percent(256, 22., side)
+        np.testing.assert_allclose(report.get_module_area_percent_distribution(side),
+                                   [expected, expected, 0.])
+        np.testing.assert_allclose(report.full_asic_area_percent(side), expected / 2)
+    assert report.full_asic_area_percent("P") > report.full_asic_area_percent("N")
+    captured = []
+    def inspect(fig, path, **kwargs):
+        ax = fig.axes[0]
+        captured.append((path, ax.get_yscale(), ax.get_xlim(), len(ax.lines)))
+    monkeypatch.setattr(Figure, "savefig", inspect)
+    report.generate_area_percent_histograms(tmp_path)
+    assert len(captured) == 15
+    for path, scale, limits, markers in captured:
+        assert scale == "log"
+        assert markers == (2 if path.parent.name == "combined" else 1)
+        if path.name == "all_reasons.png":
+            assert limits[1] >= report.get_module_area_percent_distribution("P").max()
