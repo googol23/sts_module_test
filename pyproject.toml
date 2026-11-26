@@ -28,10 +28,7 @@ sts-p-scan = "run_p_scan:main"
 
 [tool.setuptools]
 py-modules = ["run_p_scan"]
-
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["module_test*", "pscan*"]
+packages = ["module_test", "pscan"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
